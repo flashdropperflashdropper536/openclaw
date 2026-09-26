@@ -294,14 +294,17 @@ function evictOpenClawStateDatabaseAfterCorruption(
 }
 
 /** Publish a fully opened handle and bind query corruption to its exact cache owner. */
-function publishOpenClawStateDatabase(database: OpenClawStateDatabase): OpenClawStateDatabase {
+function publishOpenClawStateDatabase(
+  database: OpenClawStateDatabase,
+  env: NodeJS.ProcessEnv,
+): OpenClawStateDatabase {
   const { db, path: pathname } = database;
   admitSqliteSchema(db);
   assertSupportedStateSchemaVersion(db, pathname);
-  const identity = asyncResources.publish(pathname);
+  const { identity, admission } = asyncResources.publish(pathname);
   databaseIdentities.set(db, identity);
   cachedDatabases.set(pathname, database);
-  registerStateDatabaseWalAdmission(database, identity);
+  registerStateDatabaseWalAdmission(database, identity, admission, env);
   touchStateDatabase(database);
   openClawStateSnapshotOwners.register(database, () => cachedDatabases.get(pathname));
   ownMaintenanceStateDatabaseHandle(database);
@@ -316,8 +319,16 @@ function publishOpenClawStateDatabase(database: OpenClawStateDatabase): OpenClaw
   return database;
 }
 
-function getCachedOpenClawStateDatabase(pathname: string): OpenClawStateDatabase | undefined {
-  getOpenClawDatabaseMaintenanceScope()?.assertAdmission();
+function getCachedOpenClawStateDatabase(
+  pathname: string,
+  options?: { readOnly: true },
+): OpenClawStateDatabase | undefined {
+  const maintenance = getOpenClawDatabaseMaintenanceScope();
+  if (options?.readOnly) {
+    maintenance?.assertReadAdmission();
+  } else {
+    maintenance?.assertAdmission();
+  }
   assertExistingOpenClawStateSchemaCacheAdmission(pathname, stateDatabaseLifecycle);
   const runtimeFailure = runtimeFailures.get(pathname);
   if (runtimeFailure) {
